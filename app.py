@@ -1,12 +1,59 @@
 import sys
 import os
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton,
-                               QVBoxLayout, QWidget,
-                               QProgressBar, QTextEdit, QLabel, QFileDialog,
-                               QHBoxLayout)
+                               QVBoxLayout, QWidget, QProgressBar, QTextEdit,
+                               QLabel, QFileDialog, QHBoxLayout, QLineEdit,
+                               QMessageBox, QTabWidget)
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtGui import QFont, QIcon
 import subprocess
+import pikepdf
+from docx import Document
+import openpyxl
+import xml.etree.ElementTree as ET
+
+class DocumentUnlocker:
+    @staticmethod
+    def unlock_pdf(file_path, password):
+        try:
+            with pikepdf.open(file_path, password=password) as pdf:
+                unlocked_path = file_path.replace('.pdf', '_unlocked.pdf')
+                pdf.save(unlocked_path)
+            return unlocked_path
+        except Exception as e:
+            raise Exception(f"Failed to unlock PDF: {str(e)}")
+
+    @staticmethod
+    def unlock_docx(file_path, password):
+        try:
+            doc = Document(file_path, password=password)
+            unlocked_path = file_path.replace('.docx', '_unlocked.docx')
+            doc.save(unlocked_path)
+            return unlocked_path
+        except Exception as e:
+            raise Exception(f"Failed to unlock DOCX: {str(e)}")
+
+    @staticmethod
+    def unlock_xlsx(file_path, password):
+        try:
+            workbook = openpyxl.load_workbook(file_path, password=password)
+            unlocked_path = file_path.replace('.xlsx', '_unlocked.xlsx')
+            workbook.save(unlocked_path)
+            return unlocked_path
+        except Exception as e:
+            raise Exception(f"Failed to unlock XLSX: {str(e)}")
+
+    @staticmethod
+    def unlock_xml(file_path, password):
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+            # Implement XML unlocking logic here if needed
+            unlocked_path = file_path.replace('.xml', '_unlocked.xml')
+            tree.write(unlocked_path)
+            return unlocked_path
+        except Exception as e:
+            raise Exception(f"Failed to unlock XML: {str(e)}")
 
 class WorkerThread(QThread):
     progress_update = Signal(int)
@@ -49,14 +96,13 @@ class WorkerThread(QThread):
         self.status_update.emit("Processing completed")
         self.processing_complete.emit(output_file)
 
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Folder Content Printer")
+        self.setWindowTitle("Elegant Document Processor")
         self.setGeometry(100, 100, 800, 600)
         self.setStyleSheet("""
-            QMainWindow {
+            QMainWindow, QTabWidget::pane {
                 background-color: #2E2E2E;
                 color: #E0E0E0;
             }
@@ -86,7 +132,7 @@ class MainWindow(QMainWindow):
                                                   stop:0 #4CAF50, stop:1 #45a049);
                 border-radius: 3px;
             }
-            QTextEdit {
+            QTextEdit, QLineEdit {
                 background-color: #3E3E3E;
                 color: #E0E0E0;
                 border: 2px solid #5A5A5A;
@@ -97,9 +143,36 @@ class MainWindow(QMainWindow):
             QLabel {
                 color: #E0E0E0;
             }
+            QTabWidget::tab-bar {
+                alignment: center;
+            }
+            QTabBar::tab {
+                background-color: #4A4A4A;
+                color: #E0E0E0;
+                padding: 8px 16px;
+                margin: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #5A5A5A;
+            }
         """)
 
-        main_layout = QVBoxLayout()
+        self.tab_widget = QTabWidget()
+        self.setCentralWidget(self.tab_widget)
+
+        self.folder_tab = QWidget()
+        self.unlock_tab = QWidget()
+
+        self.tab_widget.addTab(self.folder_tab, "Folder Processing")
+        self.tab_widget.addTab(self.unlock_tab, "Unlock Document")
+
+        self.setup_folder_tab()
+        self.setup_unlock_tab()
+
+    def setup_folder_tab(self):
+        layout = QVBoxLayout()
 
         button_layout = QHBoxLayout()
         self.select_button = QPushButton("Select Folder")
@@ -115,24 +188,55 @@ class MainWindow(QMainWindow):
         self.open_folder_button.setEnabled(False)
         button_layout.addWidget(self.open_folder_button)
 
-        main_layout.addLayout(button_layout)
+        layout.addLayout(button_layout)
 
         self.progress_bar = QProgressBar()
-        main_layout.addWidget(self.progress_bar)
+        layout.addWidget(self.progress_bar)
 
         self.text_area = QTextEdit()
         self.text_area.setReadOnly(True)
-        main_layout.addWidget(self.text_area)
+        layout.addWidget(self.text_area)
 
         self.status_label = QLabel()
         self.status_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.status_label)
+        layout.addWidget(self.status_label)
 
-        container = QWidget()
-        container.setLayout(main_layout)
-        self.setCentralWidget(container)
+        self.folder_tab.setLayout(layout)
 
-        self.output_folder = None
+    def setup_unlock_tab(self):
+        layout = QVBoxLayout()
+
+        file_layout = QHBoxLayout()
+        self.file_path_input = QLineEdit()
+        self.file_path_input.setPlaceholderText("Select a file to unlock")
+        file_layout.addWidget(self.file_path_input)
+
+        self.browse_button = QPushButton("Browse")
+        self.browse_button.clicked.connect(self.browse_file)
+        file_layout.addWidget(self.browse_button)
+
+        layout.addLayout(file_layout)
+
+        password_layout = QHBoxLayout()
+        password_label = QLabel("Password:")
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.Password)
+        password_layout.addWidget(password_label)
+        password_layout.addWidget(self.password_input)
+
+        layout.addLayout(password_layout)
+
+        self.unlock_button = QPushButton("Unlock Document")
+        self.unlock_button.clicked.connect(self.unlock_document)
+        layout.addWidget(self.unlock_button)
+
+        self.unlock_status = QLabel()
+        self.unlock_status.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.unlock_status)
+
+        layout.addStretch()
+
+        self.unlock_tab.setLayout(layout)
 
     def select_folder(self):
         folder_path = QFileDialog.getExistingDirectory(self, "Select Folder")
@@ -170,6 +274,38 @@ class MainWindow(QMainWindow):
             else:  # Linux and other Unix-like
                 subprocess.Popen(["xdg-open", self.output_folder])
 
+    def browse_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select File")
+        if file_path:
+            self.file_path_input.setText(file_path)
+
+    def unlock_document(self):
+        file_path = self.file_path_input.text()
+        password = self.password_input.text()
+
+        if not file_path or not password:
+            self.unlock_status.setText("Please select a file and enter a password.")
+            return
+
+        try:
+            _, extension = os.path.splitext(file_path)
+            extension = extension.lower()
+
+            if extension == '.pdf':
+                unlocked_path = DocumentUnlocker.unlock_pdf(file_path, password)
+            elif extension == '.docx':
+                unlocked_path = DocumentUnlocker.unlock_docx(file_path, password)
+            elif extension == '.xlsx':
+                unlocked_path = DocumentUnlocker.unlock_xlsx(file_path, password)
+            elif extension == '.xml':
+                unlocked_path = DocumentUnlocker.unlock_xml(file_path, password)
+            else:
+                self.unlock_status.setText(f"Unsupported file type: {extension}")
+                return
+
+            self.unlock_status.setText(f"Document unlocked successfully. Saved as: {unlocked_path}")
+        except Exception as e:
+            self.unlock_status.setText(f"Error unlocking document: {str(e)}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
